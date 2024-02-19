@@ -1,0 +1,198 @@
+---
+title: "FMPH243B project2"
+author: "Keren Hu"
+date: "2024-02-01"
+output: html_document
+---
+
+```{r}
+# install.packages("./ADNIMERGE_0.0.1.tar.gz", repos = NULL, type = "source")
+library(ADNIMERGE)
+library(remotes)
+data(adnimerge)
+```
+
+# Data filtration
+```{r}
+pid = unique(adnimerge$RID) # 2432 participants
+# Data filtration
+dat = adnimerge[adnimerge$DX.bl %in% c("LMCI","EMCI"), ]
+dat = dat[!is.na(dat$AGE),]
+# age between 55 and 90;
+dat = dat[dat$AGE >= 55, ]
+dat = dat[dat$AGE <= 90, ]
+# M <= 36
+dat = dat[dat$M <= 36,]
+length(unique(dat$RID)) # 1109 participants
+
+basedat = dat[dat$M == 0,] # baseline dataset with 1109 participants
+```
+
+# Description of data
+```{r}
+# Create outcome variable 
+dat$cAD = ifelse(dat$DX == "Dementia", 1, 0)
+cAD_id = unique(dat$RID[dat$cAD==1])
+
+basedat$cAD = ifelse(basedat$RID %in% cAD_id, 1, 0)
+table(basedat$cAD)
+
+# Create a variable of subtype of MCI
+basedat$typeMCI = ifelse(basedat$DX.bl=="EMCI", "E",
+                         ifelse(basedat$DX.bl=="LMCI", "L", NA))
+
+# Predictors
+pred = c("AGE", "PTEDUCAT", "CDRSB.bl", "ADAS11.bl", "ADAS13.bl", "ADASQ4.bl", "MMSE.bl", "RAVLT.immediate.bl", "RAVLT.learning.bl", "RAVLT.forgetting.bl", "RAVLT.perc.forgetting.bl", "LDELTOTAL.bl", "DIGITSCOR.bl", "TRABSCOR.bl", "FAQ.bl", "PTGENDER", "typeMCI", "PTMARRY")
+
+basedf = basedat[, c("cAD", pred)]
+
+library(compareGroups)
+# Demographic description
+tab1 <- compareGroups(cAD ~ ., data = basedf)
+restab <- createTable(tab1)
+export2md(restab, caption = "Demographic characteristics of study participants")
+```
+
+
+# Pairsplot
+```{r, warning=FALSE, message=FALSE}
+# ggpairs(basedf[,c(2:16)],columnLabels = c("AGE", "YR_EDU", "CDRSD","ADAS11","ADAS13","ADASQ4","MMSE","RAVLT-I","RAVLT-L","RAVLT-F","RAVLT-PF","LDT","DIGIT","TMTBT","FAQ")) + theme(axis.text.x = element_text(face = "italic", color = "black",size = 6, angle = 45), axis.text.y=(element_text(face = "italic", color = "black",size = 6, angle = 45)))
+
+```
+
+
+# Missingness
+```{r}
+library(tidyverse)
+library(rstatix)
+library(ggpubr)
+# missing_id<- which(is.na(basedf$DIGITSCOR.bl))
+# missing_data<- basedf[missing_id,]
+# no_missing_data<- basedf[-missing_id,]
+# 
+# table(missing_data$cAD)
+# 
+# table(no_missing_data$cAD)
+# Maybe exclude DIGITSCOR first, and bring it back in the sensitivity analysis
+basedf$PTMARRY = ifelse(basedf$PTMARRY=="Unknown", NA, basedf$PTMARRY)
+(missvalue = data.frame(colSums(is.na(basedf))))
+
+# Maybe exclude DIGITSCOR first, and bring it back in the sensitivity analysis
+# delete all missing values
+basedf_nomissing = na.omit(basedf[, -14]) # 1066 rows
+# delete 43 rows with missing value
+```
+
+## Split train/testing sets
+
+```{r, message=FALSE, warning=FALSE}
+#new df for analysis
+set.seed(211)
+train<- basedf_nomissing %>%
+  sample_frac(0.7)
+test<- anti_join(basedf_nomissing, train, by=NULL)
+```
+
+## Fit logistic regression & validation
+
+```{r}
+library(caret)
+fit.logi <- glm(cAD ~ ., family = "binomial", data = train)
+fit.logi.back <- step(fit.logi, direction = "backward")
+summary(fit.logi.back)
+# delete AGE, CDRSB.bl, ADAS13.bl, MMSE.bl, RAVLT.learning.bl, RAVLT.perc.forgetting.bl, LDELTOTAL.bl, PTMARRY 8 variables during backward elimination 
+
+# Model 1: cAD ~ AGE + PTEDUCAT + CDRSB.bl + ADAS11.bl + ADAS13.bl + ADASQ4.bl + MMSE.bl + RAVLT.immediate.bl + RAVLT.learning.bl + RAVLT.forgetting.bl + RAVLT.perc.forgetting.bl + LDELTOTAL.bl + TRABSCOR.bl + FAQ.bl + PTGENDER + typeMCI + PTMARRY
+# Model 2: cAD ~ PTEDUCAT + ADAS11.bl + ADASQ4.bl + RAVLT.immediate.bl + RAVLT.forgetting.bl + TRABSCOR.bl + FAQ.bl + PTGENDER + typeMCI
+
+## cross-validation
+
+logi.pred<- predict(fit.logi.back, newdata = test[,-1], type = "response")
+logi.class.pred <- ifelse(logi.pred > 0.5, 1, 0)
+
+(conf.mat <- confusionMatrix(as.factor(logi.class.pred),as.factor(test$cAD))) # 0.8062  (95% CI: 0.7586, 0.8481)
+
+plot(logi.pred, logi.class.pred, col=test$cAD+10, pch=16)
+legend("right",legend = c("Non-converters", "Converters"),
+       col=c(10,11), pch=16)
+```
+
+## Lasso Regression & validation
+
+```{r, warning=FALSE}
+library(glmnet)
+set.seed(211)
+gridd <- exp(seq(2,-6,-0.5))  ##lambda values
+
+xxx <- as.matrix(train[,-1])
+yyy <- train[,1]
+
+##cross-validation to select lambda
+cv.lasso <- cv.glmnet(xxx,yyy,family="binomial",alpha=1,
+                      lambda=gridd, nfolds=10,
+                      type.measure="class")
+plot(cv.lasso, main= "LASSO")
+
+
+##lasso fit
+fit.lasso <- glmnet(xxx,yyy,family="binomial",alpha=0,
+                    lambda=cv.lasso$lambda.1se)
+coef(fit.lasso) # PTGENDER, typeMCI and PTMARRY omit
+
+lasso.pred <- predict(fit.lasso, s=cv.lasso$lambda.1se, 
+                      newx = as.matrix(test[,-1]),
+                      type = "response")
+lasso.pred.class = ifelse(lasso.pred>0.5, 1, 0)
+
+# confusion matrix
+(conf.mat <- confusionMatrix(as.factor(lasso.pred.class),
+                             as.factor(test$cAD)))
+#  0.8219 (95% CI: 0.7755, 0.8622)
+
+plot(lasso.pred, lasso.pred.class, col=test$cAD+10, pch=16)
+legend("right",legend = c("Non-converters", "Converters"),
+       col=c(10,11), pch=16)
+```
+
+# Sensitivity analysis
+## ITT vs. Compeleters
+```{r}
+# # When participants complete all 8 visits
+# a = table(dat$RID)
+# cpltr = names(a)[a == 8] # 135 completer
+
+# When participants complete the last visits (M=36)
+cpltr = dat$RID[dat$M == 36] # 650 completer
+
+basedat_1 = basedat[basedat$RID %in% cpltr,]
+basedf_1 = basedat_1[, c("cAD", pred)]
+basedf_1 = basedf_1[,-14]
+
+# Lasso - completer: accuracy: 0.8073 (95% CI: 0.7743, 0.8373)
+lasso.pred <- predict(fit.lasso, s=cv.lasso$lambda.1se, 
+                      newx = as.matrix(basedf_1[,-1]),
+                      type = "response")
+lasso.pred.class = ifelse(lasso.pred>0.5, 1, 0)
+
+(conf.mat <- confusionMatrix(as.factor(lasso.pred.class),
+                             as.factor(basedf_1$cAD)))
+
+# Lasso - ITT: accuracy: 0.8067 (95% CI :0.7818, 0.83)
+lasso.pred <- predict(fit.lasso, s=cv.lasso$lambda.1se, 
+                      newx = as.matrix(basedf[,-c(1,14)]),
+                      type = "response")
+lasso.pred.class = ifelse(lasso.pred>0.5, 1, 0)
+
+(conf.mat <- confusionMatrix(as.factor(lasso.pred.class),
+                             as.factor(basedf$cAD)))
+
+
+# logistic regression - completer: accuracy: 0.811 (95% CI: 0.7784, 0.8408)
+logi.pred<- predict(fit.logi.back, newdata = basedf_1[,-1], type = "response")
+logi.class.pred <- ifelse(logi.pred > 0.5, 1, 0)
+
+(conf.mat <- confusionMatrix(as.factor(logi.class.pred),
+                             as.factor(basedf_1$cAD)))
+```
+
+
