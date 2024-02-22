@@ -112,7 +112,7 @@ logi.class.pred <- ifelse(logi.pred > 0.5, 1, 0)
 
 (conf.mat <- confusionMatrix(as.factor(logi.class.pred),as.factor(test$cAD))) # 0.8062  (95% CI: 0.7586, 0.8481)
 
-plot(logi.pred, logi.class.pred, col=test$cAD+10, pch=16)
+plot(logi.pred, logi.class.pred, col=test$cAD+10, pch=16, xlab="Predicted Probability of cAD", ylab="Predicted cAD Value", main="Predicted cAD from Logistic Regression")
 legend("right",legend = c("Non-converters", "Converters"),
        col=c(10,11), pch=16)
 ```
@@ -149,7 +149,7 @@ lasso.pred.class = ifelse(lasso.pred>0.5, 1, 0)
                              as.factor(test$cAD)))
 #  0.8219 (95% CI: 0.7755, 0.8622)
 
-plot(lasso.pred, lasso.pred.class, col=test$cAD+10, pch=16)
+plot(lasso.pred, lasso.pred.class, col=test$cAD+10, pch=16, xlab="Predicted Probability of cAD", ylab="Predicted cAD Value", main="Predicted cAD from Lasso Regression")
 legend("right",legend = c("Non-converters", "Converters"),
        col=c(10,11), pch=16)
 ```
