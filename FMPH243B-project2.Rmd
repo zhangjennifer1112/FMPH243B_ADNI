@@ -185,14 +185,6 @@ lasso.pred.class = ifelse(lasso.pred>0.5, 1, 0)
 
 (conf.mat <- confusionMatrix(as.factor(lasso.pred.class),
                              as.factor(basedf$cAD)))
-
-
-# logistic regression - completer: accuracy: 0.811 (95% CI: 0.7784, 0.8408)
-logi.pred<- predict(fit.logi.back, newdata = basedf_1[,-1], type = "response")
-logi.class.pred <- ifelse(logi.pred > 0.5, 1, 0)
-
-(conf.mat <- confusionMatrix(as.factor(logi.class.pred),
-                             as.factor(basedf_1$cAD)))
 ```
 
 
